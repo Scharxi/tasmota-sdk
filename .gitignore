@@ -1,5 +1,4 @@
 node_modules
-dist
 coverage
 .idea
 .vscode
@@ -8,3 +7,12 @@ coverage
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Build artifacts (keep dist for npm package)
+*.tsbuildinfo
+
+# Test artifacts
+jest.config.js
+
+# Development files
+src/examples/
