@@ -82,28 +82,43 @@ export function transformToPowerStatus(powerData: unknown): PowerStatus {
 
 /**
  * Transform energy data from status response
+ * Handles both Status 0 (full) and Status 8 (StatusSNS only) responses
  */
 export function transformToEnergyData(statusData: unknown): EnergyData | null {
   try {
-    const parsed = StatusResponse.parse(statusData);
+    // Handle the raw response structure
+    if (typeof statusData !== 'object' || statusData === null) {
+      return null;
+    }
+
+    const data = statusData as Record<string, unknown>;
     
-    if (!parsed.StatusSNS.ENERGY) {
+    // Status 8 returns { StatusSNS: { ENERGY: {...} } }
+    // Status 0 returns { StatusSNS: { ENERGY: {...} }, ... other fields }
+    let energy: Record<string, unknown> | undefined;
+    
+    if (data.StatusSNS && typeof data.StatusSNS === 'object') {
+      const statusSNS = data.StatusSNS as Record<string, unknown>;
+      if (statusSNS.ENERGY && typeof statusSNS.ENERGY === 'object') {
+        energy = statusSNS.ENERGY as Record<string, unknown>;
+      }
+    }
+    
+    if (!energy) {
       return null; // Device doesn't support energy monitoring
     }
 
-    const energy = parsed.StatusSNS.ENERGY;
-    
     return {
-      totalStartTime: energy.TotalStartTime,
-      total: energy.Total,
-      yesterday: energy.Yesterday,
-      today: energy.Today,
-      power: energy.Power,
-      apparentPower: energy.ApparentPower,
-      reactivePower: energy.ReactivePower,
-      factor: energy.Factor,
-      voltage: energy.Voltage,
-      current: energy.Current,
+      totalStartTime: String(energy.TotalStartTime ?? ''),
+      total: Number(energy.Total ?? 0),
+      yesterday: Number(energy.Yesterday ?? 0),
+      today: Number(energy.Today ?? 0),
+      power: Number(energy.Power ?? 0),
+      apparentPower: Number(energy.ApparentPower ?? 0),
+      reactivePower: Number(energy.ReactivePower ?? 0),
+      factor: Number(energy.Factor ?? 0),
+      voltage: Number(energy.Voltage ?? 0),
+      current: Number(energy.Current ?? 0),
     };
   } catch (error) {
     if (error instanceof z.ZodError) {

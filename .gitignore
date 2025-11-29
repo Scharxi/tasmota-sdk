@@ -16,3 +16,5 @@ jest.config.js
 
 # Development files
 src/examples/
+dist/
+dist/**/*

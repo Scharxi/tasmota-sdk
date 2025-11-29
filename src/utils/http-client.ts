@@ -4,6 +4,10 @@ import { TasmotaError } from '../errors';
 
 /**
  * HTTP Client for Tasmota device communication
+ * 
+ * Tasmota uses query parameter authentication, not HTTP Basic Auth.
+ * Format: http://<ip>/cm?user=<user>&password=<password>&cmnd=<command>
+ * @see https://tasmota.github.io/docs/Commands/#with-web-requests
  */
 export class TasmotaHttpClient {
   private readonly client: AxiosInstance;
@@ -20,21 +24,13 @@ export class TasmotaHttpClient {
     };
 
     // Create axios instance with base configuration
+    // Note: Tasmota does NOT use HTTP Basic Auth - credentials go in query params
     this.client = axios.create({
       timeout: this.config.timeout,
       headers: {
-        'Content-Type': 'application/json',
         'User-Agent': 'tasmota-sdk',
       },
     });
-
-    // Set up authentication if provided
-    if (this.config.username && this.config.password) {
-      this.client.defaults.auth = {
-        username: this.config.username,
-        password: this.config.password,
-      };
-    }
 
     // Add request interceptor for logging (in development)
     this.client.interceptors.request.use(
@@ -80,11 +76,31 @@ export class TasmotaHttpClient {
   }
 
   /**
+   * Build authentication query parameters for Tasmota web requests
+   * Tasmota uses query param auth: ?user=<user>&password=<password>&cmnd=<command>
+   * @see https://tasmota.github.io/docs/Commands/#with-web-requests
+   */
+  private buildAuthParams(): Record<string, string> {
+    if (this.config.username && this.config.password) {
+      return {
+        user: this.config.username,
+        password: this.config.password,
+      };
+    }
+    return {};
+  }
+
+  /**
    * Send a command to the Tasmota device
+   * Commands are sent via: http://<ip>/cm?cmnd=<command>
+   * With auth: http://<ip>/cm?user=<user>&password=<password>&cmnd=<command>
    */
   async sendCommand<T = unknown>(command: string, options?: AxiosRequestConfig): Promise<T> {
     const url = `${this.getBaseUrl()}/cm`;
-    const params = { cmnd: command };
+    const params = {
+      ...this.buildAuthParams(),
+      cmnd: command,
+    };
 
     try {
       const response: AxiosResponse<T> = await this.client.get(url, {
@@ -100,10 +116,14 @@ export class TasmotaHttpClient {
 
   /**
    * Send a JSON command to the Tasmota device
+   * Uses /jc endpoint for JSON-formatted responses
    */
   async sendJsonCommand<T = unknown>(command: string, options?: AxiosRequestConfig): Promise<T> {
     const url = `${this.getBaseUrl()}/jc`;
-    const params = { cmnd: command };
+    const params = {
+      ...this.buildAuthParams(),
+      cmnd: command,
+    };
 
     try {
       const response: AxiosResponse<T> = await this.client.get(url, {

@@ -254,6 +254,26 @@ export class TasmotaSDK extends EventEmitter {
   }
 
   /**
+   * Start blinking all devices
+   */
+  async blinkAll(relay = 1, options?: DeviceOperationOptions): Promise<BulkOperationResult<PowerState>> {
+    return this.executeBulkOperation(
+      async (device) => device.blink(relay, options),
+      `blink(${relay})`
+    );
+  }
+
+  /**
+   * Stop blinking all devices
+   */
+  async blinkOffAll(relay = 1, options?: DeviceOperationOptions): Promise<BulkOperationResult<PowerState>> {
+    return this.executeBulkOperation(
+      async (device) => device.blinkOff(relay, options),
+      `blinkOff(${relay})`
+    );
+  }
+
+  /**
    * Set power state for all devices
    */
   async setPowerStateAll(

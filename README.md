@@ -12,10 +12,11 @@ A robust, type-safe, and asynchronous TypeScript SDK for controlling Tasmota pow
 - **Asynchronous**: Promise-based API with async/await support
 - **Device Discovery**: Automatic network scanning and device discovery
 - **Multi-Device Management**: Control multiple devices simultaneously
+- **Backlog Support**: Execute up to 30 commands in a single request
 - **Error Handling**: Comprehensive error handling with custom error types
 - **Energy Monitoring**: Support for devices with power monitoring capabilities
 - **Health Monitoring**: Automatic device health checking and status tracking
-- **Retry Logic**: Built-in retry mechanisms for network operations
+- **Retry Logic**: Built-in retry mechanisms with exponential backoff
 - **Validation**: Input validation using Zod schemas
 - **Event-Driven**: Event emitters for real-time device status updates
 
@@ -39,39 +40,163 @@ yarn add tasmota-sdk
 import { createDevice, TasmotaError } from 'tasmota-sdk';
 
 async function controlDevice() {
-  try {
-    // Create a device instance
-    const device = createDevice('192.168.1.100');
-    
-    // Test connection
-    const isOnline = await device.ping();
-    console.log(`Device is ${isOnline ? 'online' : 'offline'}`);
-    
-    // Get device information
-    const info = await device.getDeviceInfo();
-    console.log(`Device: ${info.friendlyName[0]} (${info.version})`);
-    
-    // Control power
-    await device.turnOn();
-    console.log('Device turned on');
-    
-    // Get current power state
-    const powerState = await device.getPowerState();
-    console.log(`Current state: ${powerState}`);
-    
-    // Toggle power
-    await device.toggle();
-    console.log('Device toggled');
-    
-    // Clean up
-    device.destroy();
-    
-  } catch (error) {
-    if (TasmotaError.isTasmotaError(error)) {
-      console.error('Tasmota Error:', error.getUserFriendlyMessage());
-    } else {
-      console.error('Unknown error:', error);
-    }
+  // Create a device instance
+  const device = createDevice('192.168.1.100');
+  
+  // Test connection
+  const isOnline = await device.ping();
+  console.log(`Device is ${isOnline ? 'online' : 'offline'}`);
+  
+  // Get device information
+  const info = await device.getDeviceInfo();
+  console.log(`Device: ${info.friendlyName[0]} (${info.version})`);
+  console.log(`Uptime: ${info.uptime}`);
+  
+  // Control power
+  await device.turnOn();       // Turn on relay 1
+  await device.turnOff();      // Turn off relay 1
+  await device.toggle();       // Toggle relay 1
+  
+  // Get current power state
+  const powerState = await device.getPowerState();
+  console.log(`Current state: ${powerState}`); // 'ON' or 'OFF'
+  
+  // Clean up
+  device.destroy();
+}
+```
+
+### Device with Authentication
+
+Tasmota uses query parameter authentication (not HTTP Basic Auth):
+
+```typescript
+import { createDevice } from 'tasmota-sdk';
+
+// If your device has web authentication enabled
+const device = createDevice('192.168.1.100', {
+  username: 'admin',
+  password: 'your-password',
+});
+
+// Requests will be sent as:
+// http://192.168.1.100/cm?user=admin&password=your-password&cmnd=Power
+```
+
+### Power Commands
+
+The SDK supports all Tasmota power command formats:
+
+```typescript
+import { createDevice } from 'tasmota-sdk';
+
+const device = createDevice('192.168.1.100');
+
+// All these are equivalent for turning ON
+await device.setPowerState('ON', 1);
+await device.setPowerState('on', 1);
+await device.setPowerState('1', 1);
+await device.setPowerState('true', 1);
+
+// All these are equivalent for turning OFF
+await device.setPowerState('OFF', 1);
+await device.setPowerState('off', 1);
+await device.setPowerState('0', 1);
+await device.setPowerState('false', 1);
+
+// Toggle
+await device.setPowerState('TOGGLE', 1);
+await device.setPowerState('toggle', 1);
+await device.setPowerState('2', 1);
+
+// Blink commands
+await device.blink(1);       // Start blinking relay 1
+await device.blinkOff(1);    // Stop blinking relay 1
+
+// Or using setPowerState
+await device.setPowerState('3', 1);  // Start blink
+await device.setPowerState('4', 1);  // Stop blink
+```
+
+### Backlog - Execute Multiple Commands
+
+Execute up to 30 commands in a single request using Tasmota's Backlog feature:
+
+```typescript
+import { createDevice } from 'tasmota-sdk';
+
+const device = createDevice('192.168.1.100');
+
+// Configure WiFi and MQTT in one request
+await device.backlog([
+  'SSID1 MyNetwork',
+  'Password1 MyPassword',
+  'MqttHost broker.local',
+  'MqttUser mqttuser',
+  'MqttPassword mqttpass',
+]);
+
+// Create a power sequence with delays
+await device.backlog([
+  'Power1 ON',
+  'Delay 20',      // 2 second delay (in 100ms units)
+  'Power1 OFF',
+  'Delay 10',
+  'Power1 ON',
+]);
+
+// Clear any pending backlog commands
+await device.clearBacklog();
+```
+
+### Multi-Relay Devices
+
+```typescript
+import { createDevice } from 'tasmota-sdk';
+
+const device = createDevice('192.168.1.100');
+
+// Get number of relays
+const relayCount = await device.getRelayCount();
+console.log(`Device has ${relayCount} relays`);
+
+// Control specific relays
+await device.turnOn(1);   // Turn on relay 1
+await device.turnOn(2);   // Turn on relay 2
+await device.turnOff(3);  // Turn off relay 3
+await device.toggle(4);   // Toggle relay 4
+
+// Control all relays at once
+await device.turnOnAll();
+await device.turnOffAll();
+
+// Get status of all relays
+const status = await device.getPowerStatus();
+console.log(`Relay 1: ${status.relays['1']}`);
+console.log(`Relay 2: ${status.relays['2']}`);
+```
+
+### Energy Monitoring
+
+```typescript
+import { createDevice } from 'tasmota-sdk';
+
+const device = createDevice('192.168.1.100');
+
+// Check if device supports energy monitoring
+const supportsEnergy = await device.supportsEnergyMonitoring();
+
+if (supportsEnergy) {
+  const energy = await device.getEnergyData();
+  
+  if (energy) {
+    console.log(`Current Power: ${energy.power}W`);
+    console.log(`Voltage: ${energy.voltage}V`);
+    console.log(`Current: ${energy.current}A`);
+    console.log(`Power Factor: ${energy.factor}`);
+    console.log(`Today: ${energy.today}kWh`);
+    console.log(`Yesterday: ${energy.yesterday}kWh`);
+    console.log(`Total: ${energy.total}kWh`);
   }
 }
 ```
@@ -81,122 +206,195 @@ async function controlDevice() {
 ```typescript
 import { discoverDevices, createSDK } from 'tasmota-sdk';
 
-async function discoverAndManage() {
-  // Quick discovery
-  const result = await discoverDevices({
-    network: '192.168.1.0',
-    startIp: 1,
-    endIp: 254,
-    timeout: 3000,
-  });
-  
-  console.log(`Found ${result.totalFound} Tasmota devices`);
-  
-  // List discovered devices
-  result.devices.forEach(device => {
-    console.log(`- ${device.friendlyName} at ${device.ipAddress}`);
-  });
-  
-  // Create SDK and add discovered devices
-  const sdk = createSDK();
-  
-  for (const device of result.devices) {
-    sdk.addDevice({
-      host: device.ipAddress,
-      port: 80,
-      timeout: 5000,
-    });
-  }
-  
-  // Control all devices
-  await sdk.turnOnAll();
-  console.log('All devices turned on');
-  
-  // Clean up
-  sdk.destroy();
+// Quick discovery on a network range
+const result = await discoverDevices({
+  network: '192.168.1.0',
+  startIp: 1,
+  endIp: 254,
+  timeout: 3000,
+  concurrency: 50,
+});
+
+console.log(`Found ${result.totalFound} Tasmota devices in ${result.duration}ms`);
+
+// List discovered devices
+for (const device of result.devices) {
+  console.log(`- ${device.friendlyName} (${device.ipAddress})`);
+  console.log(`  Version: ${device.version}`);
+  console.log(`  MAC: ${device.macAddress}`);
 }
+
+// Auto-discover and add to SDK
+const sdk = createSDK();
+await sdk.discoverAndAddDevices({
+  network: '192.168.1.0',
+  timeout: 3000,
+});
+
+console.log(`Managing ${sdk.getDeviceCount()} devices`);
 ```
 
-### Multi-Device Management
+### Multi-Device Management with SDK
 
 ```typescript
-import { createSDK, TasmotaSDK } from 'tasmota-sdk';
+import { createSDK } from 'tasmota-sdk';
 
-async function manageMultipleDevices() {
-  const sdk = createSDK({
-    defaultTimeout: 5000,
-    retryAttempts: 3,
-    retryDelay: 1000,
-  });
-  
-  // Add devices
-  const device1 = sdk.addDevice({ host: '192.168.1.100', port: 80, timeout: 5000 });
-  const device2 = sdk.addDevice({ host: '192.168.1.101', port: 80, timeout: 5000 });
-  
-  // Setup event handlers
-  sdk.on('device-online', (deviceId) => {
-    console.log(`Device ${deviceId} came online`);
-  });
-  
-  sdk.on('device-offline', (deviceId) => {
-    console.log(`Device ${deviceId} went offline`);
-  });
-  
-  // Start health monitoring
-  sdk.startHealthCheck(30000); // Check every 30 seconds
-  
-  // Bulk operations
-  const pingResults = await sdk.pingAllDevices();
-  console.log(`Ping results: ${pingResults.successCount} successful, ${pingResults.failureCount} failed`);
-  
-  const toggleResults = await sdk.toggleAll();
-  console.log(`Toggle results: ${toggleResults.successCount} successful, ${toggleResults.failureCount} failed`);
-  
-  // Send custom commands
-  const statusResults = await sdk.sendCommandToAll('Status');
-  console.log(`Status command results: ${statusResults.successCount} successful`);
-  
-  // Clean up
-  sdk.stopHealthCheck();
-  sdk.destroy();
+const sdk = createSDK({
+  defaultTimeout: 5000,
+  retryAttempts: 3,
+  retryDelay: 1000,
+});
+
+// Add devices manually
+sdk.addDevice({ host: '192.168.1.100' });
+sdk.addDevice({ host: '192.168.1.101' });
+sdk.addDevice({ host: '192.168.1.102' }, 'living-room');
+
+// Setup event handlers
+sdk.on('device-online', (deviceId) => {
+  console.log(`Device ${deviceId} came online`);
+});
+
+sdk.on('device-offline', (deviceId) => {
+  console.log(`Device ${deviceId} went offline`);
+});
+
+// Start health monitoring (checks every 30 seconds)
+sdk.startHealthCheck(30000);
+
+// Bulk operations
+const pingResults = await sdk.pingAllDevices();
+console.log(`${pingResults.successCount}/${pingResults.totalDevices} devices online`);
+
+// Turn on all devices
+await sdk.turnOnAll();
+
+// Turn off all devices
+await sdk.turnOffAll();
+
+// Toggle all devices
+await sdk.toggleAll();
+
+// Blink all devices
+await sdk.blinkAll();
+
+// Send command to all devices
+await sdk.sendCommandToAll('Status 0');
+
+// Send command to specific devices
+await sdk.sendCommandToDevices(['living-room', '192.168.1.100'], 'Power TOGGLE');
+
+// Get online/offline devices
+const online = sdk.getOnlineDevices();
+const offline = sdk.getOfflineDevices();
+
+// Cleanup
+sdk.stopHealthCheck();
+sdk.destroy();
+```
+
+### Custom Commands
+
+Send any Tasmota command directly:
+
+```typescript
+import { createDevice } from 'tasmota-sdk';
+
+const device = createDevice('192.168.1.100');
+
+// Get full device status
+const status = await device.sendCommand('Status 0');
+console.log(status.data);
+
+// Set device name
+await device.sendCommand('DeviceName Living Room Light');
+
+// Configure power-on behavior
+await device.sendCommand('PowerOnState 1'); // Always ON when powered
+
+// Set timezone
+await device.sendCommand('Timezone +01:00');
+
+// Configure MQTT
+await device.sendCommand('MqttHost broker.local');
+
+// Restart device
+await device.restart();
+```
+
+### Error Handling
+
+```typescript
+import { createDevice, TasmotaError } from 'tasmota-sdk';
+
+const device = createDevice('192.168.1.100');
+
+try {
+  await device.turnOn();
+} catch (error) {
+  if (TasmotaError.isTasmotaError(error)) {
+    console.error('Error Type:', error.type);
+    console.error('Message:', error.message);
+    console.error('User-Friendly:', error.getUserFriendlyMessage());
+    console.error('Device:', error.deviceHost);
+    console.error('Command:', error.command);
+    
+    // Handle specific error types
+    switch (error.type) {
+      case 'TIMEOUT_ERROR':
+        console.log('Device is not responding');
+        break;
+      case 'DEVICE_NOT_FOUND':
+        console.log('Device is unreachable');
+        break;
+      case 'AUTHENTICATION_ERROR':
+        console.log('Invalid credentials');
+        break;
+      case 'COMMAND_FAILED':
+        console.log('Command was rejected');
+        break;
+    }
+  }
 }
 ```
 
-## 📚 API Documentation
+## 📚 API Reference
 
-### Core Classes
+### TasmotaDevice
 
-#### `TasmotaDevice`
-
-The main class for controlling individual Tasmota devices.
+Main class for controlling individual Tasmota devices.
 
 ```typescript
 class TasmotaDevice {
   // Connection
-  async ping(options?: DeviceOperationOptions): Promise<boolean>
+  ping(options?: DeviceOperationOptions): Promise<boolean>
   
   // Device Information
-  async getDeviceInfo(options?: DeviceOperationOptions & { forceRefresh?: boolean }): Promise<DeviceInfo>
-  async getUptime(options?: DeviceOperationOptions): Promise<number>
+  getDeviceInfo(options?: { forceRefresh?: boolean }): Promise<DeviceInfo>
+  getUptime(options?: DeviceOperationOptions): Promise<number>
+  getRelayCount(options?: DeviceOperationOptions): Promise<number>
   
   // Power Control
-  async getPowerState(relay?: number, options?: DeviceOperationOptions): Promise<PowerState>
-  async getPowerStatus(options?: DeviceOperationOptions): Promise<PowerStatus>
-  async setPowerState(state: PowerCommand, relay?: number, options?: DeviceOperationOptions): Promise<PowerState>
-  async turnOn(relay?: number, options?: DeviceOperationOptions): Promise<PowerState>
-  async turnOff(relay?: number, options?: DeviceOperationOptions): Promise<PowerState>
-  async toggle(relay?: number, options?: DeviceOperationOptions): Promise<PowerState>
-  async turnOnAll(options?: DeviceOperationOptions): Promise<PowerStatus>
-  async turnOffAll(options?: DeviceOperationOptions): Promise<PowerStatus>
+  getPowerState(relay?: number): Promise<PowerState>
+  getPowerStatus(): Promise<PowerStatus>
+  setPowerState(state: PowerCommand, relay?: number): Promise<PowerState>
+  turnOn(relay?: number): Promise<PowerState>
+  turnOff(relay?: number): Promise<PowerState>
+  toggle(relay?: number): Promise<PowerState>
+  blink(relay?: number): Promise<PowerState>
+  blinkOff(relay?: number): Promise<PowerState>
+  turnOnAll(): Promise<PowerStatus>
+  turnOffAll(): Promise<PowerStatus>
   
   // Energy Monitoring
-  async getEnergyData(options?: DeviceOperationOptions): Promise<EnergyData | null>
-  async supportsEnergyMonitoring(options?: DeviceOperationOptions): Promise<boolean>
+  getEnergyData(): Promise<EnergyData | null>
+  supportsEnergyMonitoring(): Promise<boolean>
   
-  // Advanced
-  async sendCommand<T>(command: string, options?: DeviceOperationOptions): Promise<CommandResponse<T>>
-  async restart(options?: DeviceOperationOptions): Promise<CommandResponse>
-  async getRelayCount(options?: DeviceOperationOptions): Promise<number>
+  // Commands
+  sendCommand<T>(command: string): Promise<CommandResponse<T>>
+  backlog(commands: string[]): Promise<CommandResponse>
+  clearBacklog(): Promise<CommandResponse>
+  restart(): Promise<CommandResponse>
   
   // Utility
   getConfig(): DeviceConfig
@@ -205,15 +403,15 @@ class TasmotaDevice {
   clearCache(): void
   destroy(): void
   
-  // Static Methods
-  static fromIp(ipAddress: string, options?: Partial<DeviceConfig>): TasmotaDevice
+  // Static Factory Methods
+  static fromIp(ip: string, options?: Partial<DeviceConfig>): TasmotaDevice
   static fromHostname(hostname: string, options?: Partial<DeviceConfig>): TasmotaDevice
 }
 ```
 
-#### `TasmotaSDK`
+### TasmotaSDK
 
-SDK for managing multiple devices simultaneously.
+SDK for managing multiple devices.
 
 ```typescript
 class TasmotaSDK extends EventEmitter {
@@ -229,77 +427,75 @@ class TasmotaSDK extends EventEmitter {
   getOfflineDevices(): string[]
   
   // Discovery
-  async discoverAndAddDevices(options?: DiscoveryOptions): Promise<DiscoveryResult>
+  discoverAndAddDevices(options?: DiscoveryOptions): Promise<DiscoveryResult>
   
   // Bulk Operations
-  async pingAllDevices(options?: DeviceOperationOptions): Promise<BulkOperationResult<boolean>>
-  async turnOnAll(relay?: number, options?: DeviceOperationOptions): Promise<BulkOperationResult<PowerState>>
-  async turnOffAll(relay?: number, options?: DeviceOperationOptions): Promise<BulkOperationResult<PowerState>>
-  async toggleAll(relay?: number, options?: DeviceOperationOptions): Promise<BulkOperationResult<PowerState>>
-  async setPowerStateAll(state: PowerCommand, relay?: number, options?: DeviceOperationOptions): Promise<BulkOperationResult<PowerState>>
-  async sendCommandToAll<T>(command: string, options?: DeviceOperationOptions): Promise<BulkOperationResult<T | undefined>>
-  async sendCommandToDevices<T>(deviceIds: string[], command: string, options?: DeviceOperationOptions): Promise<BulkOperationResult<T | undefined>>
+  pingAllDevices(): Promise<BulkOperationResult<boolean>>
+  turnOnAll(relay?: number): Promise<BulkOperationResult<PowerState>>
+  turnOffAll(relay?: number): Promise<BulkOperationResult<PowerState>>
+  toggleAll(relay?: number): Promise<BulkOperationResult<PowerState>>
+  blinkAll(relay?: number): Promise<BulkOperationResult<PowerState>>
+  blinkOffAll(relay?: number): Promise<BulkOperationResult<PowerState>>
+  setPowerStateAll(state: PowerCommand, relay?: number): Promise<BulkOperationResult<PowerState>>
+  sendCommandToAll<T>(command: string): Promise<BulkOperationResult<T>>
+  sendCommandToDevices<T>(deviceIds: string[], command: string): Promise<BulkOperationResult<T>>
   
   // Health Monitoring
   startHealthCheck(intervalMs?: number): void
   stopHealthCheck(): void
   
-  // Utility
-  clearDevices(): void
-  destroy(): void
-  
-  // Static Methods
-  static create(options?: SDKOptions): TasmotaSDK
+  // Events: 'device-added', 'device-removed', 'device-online', 'device-offline', 'discovery-complete', 'error'
 }
 ```
 
-#### `TasmotaDeviceDiscovery`
+### TasmotaDeviceDiscovery
 
-Device discovery and network scanning.
+Network scanning and device discovery.
 
 ```typescript
 class TasmotaDeviceDiscovery extends EventEmitter {
-  async discover(options?: DiscoveryOptions): Promise<DiscoveryResult>
-  async discoverByNetwork(network: string, options?: Omit<DiscoveryOptions, 'network'>): Promise<DiscoveryResult>
-  async discoverByIps(ipAddresses: string[], options?: Omit<DiscoveryOptions, 'ipAddresses'>): Promise<DiscoveryResult>
-  async quickDiscover(options?: Omit<DiscoveryOptions, 'network'>): Promise<DiscoveryResult>
-  async scanDevice(ip: string, timeout?: number): Promise<DiscoveryDevice | null>
-  async isTasmotaDevice(ip: string, timeout?: number): Promise<boolean>
+  discover(options?: DiscoveryOptions): Promise<DiscoveryResult>
+  discoverByNetwork(network: string): Promise<DiscoveryResult>
+  discoverByIps(ipAddresses: string[]): Promise<DiscoveryResult>
+  scanDevice(ip: string, timeout?: number): Promise<DiscoveryDevice | null>
+  isTasmotaDevice(ip: string, timeout?: number): Promise<boolean>
   stopScan(): void
   isScanInProgress(): boolean
   
-  // Static Methods
-  static create(options?: SDKOptions): TasmotaDeviceDiscovery
-  static async discover(options?: DiscoveryOptions): Promise<DiscoveryResult>
-  static async scanDevice(ip: string, timeout?: number): Promise<DiscoveryDevice | null>
-  static async isTasmotaDevice(ip: string, timeout?: number): Promise<boolean>
+  // Events: 'device-found', 'scan-progress', 'scan-complete', 'error'
 }
 ```
 
 ### Types
 
-#### Core Types
-
 ```typescript
-// Power Control
+// Power States
 type PowerState = 'ON' | 'OFF';
-type PowerCommand = 'ON' | 'OFF' | 'TOGGLE';
 
-// Configuration
+// Power Commands (all formats accepted by Tasmota)
+type PowerCommand = 
+  | 'ON' | 'OFF' | 'TOGGLE'           // Uppercase
+  | 'on' | 'off' | 'toggle'           // Lowercase
+  | '0' | '1' | '2'                   // Numeric
+  | 'true' | 'false'                  // Boolean
+  | '3' | '4' | 'BLINK' | 'BLINKOFF'; // Blink
+
+// Device Configuration
 interface DeviceConfig {
-  host: string;
-  port?: number;
-  timeout?: number;
-  username?: string;
-  password?: string;
+  host: string;           // IP address or hostname
+  port?: number;          // Default: 80
+  timeout?: number;       // Default: 5000ms
+  username?: string;      // For web authentication
+  password?: string;      // For web authentication
 }
 
+// SDK Options
 interface SDKOptions {
-  defaultTimeout?: number;
-  retryAttempts?: number;
-  retryDelay?: number;
-  discoveryTimeout?: number;
-  validateResponses?: boolean;
+  defaultTimeout?: number;      // Default: 5000ms
+  retryAttempts?: number;       // Default: 3
+  retryDelay?: number;          // Default: 1000ms
+  discoveryTimeout?: number;    // Default: 10000ms
+  validateResponses?: boolean;  // Default: true
 }
 
 // Device Information
@@ -321,75 +517,31 @@ interface PowerStatus {
   relays: Record<string, PowerState>;
 }
 
-// Energy Monitoring
+// Energy Data
 interface EnergyData {
   totalStartTime: string;
-  total: number;
-  yesterday: number;
-  today: number;
-  power: number;
+  total: number;        // kWh
+  yesterday: number;    // kWh
+  today: number;        // kWh
+  power: number;        // W
   apparentPower: number;
   reactivePower: number;
   factor: number;
-  voltage: number;
-  current: number;
+  voltage: number;      // V
+  current: number;      // A
 }
 
-// Discovery
-interface DiscoveryDevice {
-  hostname: string;
-  ipAddress: string;
-  macAddress: string;
-  friendlyName: string;
-  version: string;
-  module: string;
-  fallbackTopic: string;
-  fullTopic: string;
-}
-
+// Discovery Options
 interface DiscoveryOptions {
-  network?: string;
-  startIp?: number;
-  endIp?: number;
-  ipAddresses?: string[];
-  timeout?: number;
-  concurrency?: number;
-  includeOffline?: boolean;
+  network?: string;           // e.g., '192.168.1.0'
+  startIp?: number;           // Default: 1
+  endIp?: number;             // Default: 254
+  ipAddresses?: string[];     // Specific IPs to scan
+  timeout?: number;           // Per-device timeout
+  concurrency?: number;       // Max concurrent scans (default: 50)
 }
 
-interface DiscoveryResult {
-  devices: DiscoveryDevice[];
-  totalScanned: number;
-  totalFound: number;
-  duration: number;
-  errors: Array<{ ip: string; error: string }>;
-}
-
-// Operations
-interface DeviceOperationOptions {
-  timeout?: number;
-  retries?: number;
-  retryDelay?: number;
-}
-
-interface CommandResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: TasmotaErrorDetails;
-}
-
-interface BulkOperationResult<T = unknown> {
-  successful: Array<{ deviceId: string; result: T }>;
-  failed: Array<{ deviceId: string; error: TasmotaError }>;
-  totalDevices: number;
-  successCount: number;
-  failureCount: number;
-}
-```
-
-#### Error Types
-
-```typescript
+// Error Types
 type TasmotaErrorType = 
   | 'NETWORK_ERROR'
   | 'TIMEOUT_ERROR'
@@ -398,307 +550,28 @@ type TasmotaErrorType =
   | 'INVALID_RESPONSE'
   | 'COMMAND_FAILED'
   | 'VALIDATION_ERROR';
-
-interface TasmotaErrorDetails {
-  type: TasmotaErrorType;
-  message: string;
-  originalError?: unknown;
-  deviceHost?: string;
-  command?: string;
-  statusCode?: number;
-}
-
-class TasmotaError extends Error {
-  readonly type: TasmotaErrorType;
-  readonly originalError?: unknown;
-  readonly deviceHost?: string;
-  readonly command?: string;
-  readonly statusCode?: number;
-  
-  getUserFriendlyMessage(): string;
-  toJSON(): Record<string, unknown>;
-  
-  // Static factory methods
-  static networkError(message: string, originalError?: unknown, deviceHost?: string, command?: string): TasmotaError;
-  static timeoutError(deviceHost: string, command?: string, timeout?: number): TasmotaError;
-  static authenticationError(deviceHost: string): TasmotaError;
-  static deviceNotFound(deviceHost: string): TasmotaError;
-  static invalidResponse(message: string, deviceHost?: string, command?: string, originalError?: unknown): TasmotaError;
-  static commandFailed(command: string, deviceHost: string, statusCode?: number, originalError?: unknown): TasmotaError;
-  static validationError(message: string, originalError?: unknown, deviceHost?: string): TasmotaError;
-  static fromUnknown(error: unknown, deviceHost?: string, command?: string): TasmotaError;
-  static isTasmotaError(error: unknown): error is TasmotaError;
-}
-```
-
-### Utility Functions
-
-```typescript
-// Device Creation
-function createSDK(options?: SDKOptions): TasmotaSDK;
-function createDevice(ipAddress: string, options?: Partial<DeviceConfig>): TasmotaDevice;
-function createDiscovery(options?: SDKOptions): TasmotaDeviceDiscovery;
-
-// Quick Operations
-async function discoverDevices(options?: DiscoveryOptions): Promise<DiscoveryResult>;
-async function scanDevice(ip: string, timeout?: number): Promise<DiscoveryDevice | null>;
-async function isTasmotaDevice(ip: string, timeout?: number): Promise<boolean>;
-
-// Utility Functions (Advanced)
-function transformToDeviceInfo(statusData: unknown): DeviceInfo;
-function transformToPowerStatus(powerData: unknown): PowerStatus;
-function transformToEnergyData(statusData: unknown): EnergyData | null;
-function normalizeIpAddress(input: string): string;
-function isValidIpAddress(ip: string): boolean;
-function generateIpRange(baseIp: string, start?: number, end?: number): string[];
-async function retryOperation<T>(operation: () => Promise<T>, maxAttempts?: number, delay?: number, backoffMultiplier?: number): Promise<T>;
 ```
 
 ## 🔧 Configuration
 
-### Device Configuration
+### Operation Options
+
+All device operations accept optional configuration:
 
 ```typescript
-const deviceConfig: DeviceConfig = {
-  host: '192.168.1.100',    // Required: Device IP address or hostname
-  port: 80,                 // Optional: HTTP port (default: 80)
-  timeout: 5000,            // Optional: Request timeout in ms (default: 5000)
-  username: 'admin',        // Optional: HTTP authentication username
-  password: 'password',     // Optional: HTTP authentication password
-};
-```
-
-### SDK Options
-
-```typescript
-const sdkOptions: SDKOptions = {
-  defaultTimeout: 5000,     // Default timeout for all operations (default: 5000ms)
-  retryAttempts: 3,         // Number of retry attempts for failed operations (default: 3)
-  retryDelay: 1000,         // Delay between retry attempts (default: 1000ms)
-  discoveryTimeout: 10000,  // Timeout for discovery operations (default: 10000ms)
-  validateResponses: true,  // Enable response validation using Zod (default: true)
-};
-```
-
-### Discovery Options
-
-```typescript
-const discoveryOptions: DiscoveryOptions = {
-  network: '192.168.1.0',   // Network to scan (CIDR notation supported)
-  startIp: 1,               // Start IP range (default: 1)
-  endIp: 254,               // End IP range (default: 254)
-  ipAddresses: [],          // Specific IP addresses to scan (alternative to network range)
-  timeout: 3000,            // Timeout per device scan (default: 3000ms)
-  concurrency: 50,          // Maximum concurrent scans (default: 50)
-  includeOffline: false,    // Include offline devices in results (default: false)
-};
-```
-
-## 📝 Examples
-
-### Energy Monitoring
-
-```typescript
-import { createDevice } from 'tasmota-sdk';
-
-async function monitorEnergy() {
-  const device = createDevice('192.168.1.100');
-  
-  // Check if device supports energy monitoring
-  const supportsEnergy = await device.supportsEnergyMonitoring();
-  
-  if (supportsEnergy) {
-    const energyData = await device.getEnergyData();
-    
-    if (energyData) {
-      console.log(`Current Power: ${energyData.power}W`);
-      console.log(`Today's Consumption: ${energyData.today}kWh`);
-      console.log(`Total Consumption: ${energyData.total}kWh`);
-      console.log(`Voltage: ${energyData.voltage}V`);
-      console.log(`Current: ${energyData.current}A`);
-    }
-  } else {
-    console.log('Device does not support energy monitoring');
-  }
-  
-  device.destroy();
+interface DeviceOperationOptions {
+  timeout?: number;     // Request timeout in ms
+  retries?: number;     // Number of retry attempts
+  retryDelay?: number;  // Delay between retries in ms
 }
+
+// Example usage
+await device.turnOn(1, {
+  timeout: 10000,
+  retries: 5,
+  retryDelay: 2000,
+});
 ```
-
-### Multi-Relay Control
-
-```typescript
-import { createDevice } from 'tasmota-sdk';
-
-async function controlMultiRelay() {
-  const device = createDevice('192.168.1.100');
-  
-  // Get number of relays
-  const relayCount = await device.getRelayCount();
-  console.log(`Device has ${relayCount} relays`);
-  
-  // Control each relay individually
-  for (let relay = 1; relay <= relayCount; relay++) {
-    console.log(`Controlling relay ${relay}`);
-    
-    // Turn on relay
-    await device.turnOn(relay);
-    console.log(`Relay ${relay} turned on`);
-    
-    // Wait 1 second
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Turn off relay
-    await device.turnOff(relay);
-    console.log(`Relay ${relay} turned off`);
-  }
-  
-  // Control all relays at once
-  await device.turnOnAll();
-  console.log('All relays turned on');
-  
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  await device.turnOffAll();
-  console.log('All relays turned off');
-  
-  device.destroy();
-}
-```
-
-### Custom Commands
-
-```typescript
-import { createDevice, TasmotaError } from 'tasmota-sdk';
-
-async function sendCustomCommands() {
-  const device = createDevice('192.168.1.100');
-  
-  try {
-    // Get device status
-    const statusResult = await device.sendCommand('Status 0');
-    if (statusResult.success) {
-      console.log('Device Status:', statusResult.data);
-    }
-    
-    // Set device name
-    const setNameResult = await device.sendCommand('DeviceName MyTasmotaDevice');
-    if (setNameResult.success) {
-      console.log('Device name set successfully');
-    }
-    
-    // Get WiFi information
-    const wifiResult = await device.sendCommand('Status 5');
-    if (wifiResult.success) {
-      console.log('WiFi Info:', wifiResult.data);
-    }
-    
-    // Set power on state (device behavior when powered on)
-    const powerOnStateResult = await device.sendCommand('PowerOnState 1');
-    if (powerOnStateResult.success) {
-      console.log('Power on state set to ON');
-    }
-    
-  } catch (error) {
-    if (TasmotaError.isTasmotaError(error)) {
-      console.error('Command failed:', error.getUserFriendlyMessage());
-    } else {
-      console.error('Unknown error:', error);
-    }
-  } finally {
-    device.destroy();
-  }
-}
-```
-
-### Event Handling
-
-```typescript
-import { createSDK } from 'tasmota-sdk';
-
-async function handleEvents() {
-  const sdk = createSDK();
-  
-  // Device status events
-  sdk.on('device-added', (entry) => {
-    console.log(`Device added: ${entry.id} (${entry.config.host})`);
-  });
-  
-  sdk.on('device-removed', (deviceId) => {
-    console.log(`Device removed: ${deviceId}`);
-  });
-  
-  sdk.on('device-online', (deviceId) => {
-    console.log(`Device ${deviceId} came online`);
-  });
-  
-  sdk.on('device-offline', (deviceId) => {
-    console.log(`Device ${deviceId} went offline`);
-  });
-  
-  // Discovery events
-  sdk.on('discovery-complete', (result) => {
-    console.log(`Discovery completed: found ${result.totalFound} devices`);
-  });
-  
-  // Error events
-  sdk.on('error', (error) => {
-    console.error('SDK Error:', error.getUserFriendlyMessage());
-  });
-  
-  // Add some devices and start health monitoring
-  sdk.addDevice({ host: '192.168.1.100', port: 80, timeout: 5000 });
-  sdk.addDevice({ host: '192.168.1.101', port: 80, timeout: 5000 });
-  
-  sdk.startHealthCheck(30000); // Check every 30 seconds
-  
-  // Let it run for a while
-  await new Promise(resolve => setTimeout(resolve, 60000));
-  
-  // Clean up
-  sdk.stopHealthCheck();
-  sdk.destroy();
-}
-```
-
-## 🛠️ Advanced Usage
-
-For more advanced usage examples, including smart home automation, custom device classes, and complex discovery patterns, see the [Advanced Examples](src/examples/advanced-usage.ts) file.
-
-## 🚨 Error Handling
-
-The SDK provides comprehensive error handling with custom error types:
-
-```typescript
-import { TasmotaError } from 'tasmota-sdk';
-
-try {
-  // Your Tasmota operations here
-} catch (error) {
-  if (TasmotaError.isTasmotaError(error)) {
-    // Handle Tasmota-specific errors
-    console.error('Error Type:', error.type);
-    console.error('Error Message:', error.message);
-    console.error('User-Friendly Message:', error.getUserFriendlyMessage());
-    console.error('Device Host:', error.deviceHost);
-    console.error('Failed Command:', error.command);
-    console.error('Status Code:', error.statusCode);
-  } else {
-    // Handle other errors
-    console.error('Unknown error:', error);
-  }
-}
-```
-
-### Error Types
-
-- `NETWORK_ERROR`: Network connectivity issues
-- `TIMEOUT_ERROR`: Request timeout
-- `AUTHENTICATION_ERROR`: HTTP authentication failure
-- `DEVICE_NOT_FOUND`: Device not reachable or not found
-- `INVALID_RESPONSE`: Invalid or unexpected response from device
-- `COMMAND_FAILED`: Tasmota command execution failed
-- `VALIDATION_ERROR`: Input validation failure
 
 ## 🧪 Testing
 
@@ -706,11 +579,11 @@ try {
 # Run tests
 npm test
 
-# Run tests in watch mode
-npm run test:watch
-
 # Run tests with coverage
 npm run test:coverage
+
+# Run tests in watch mode
+npm run test:watch
 ```
 
 ## 🏗️ Building
@@ -719,15 +592,32 @@ npm run test:coverage
 # Build the project
 npm run build
 
-# Build in watch mode
-npm run build:watch
+# Clean build
+npm run build:clean
 
-# Lint the code
+# Lint code
 npm run lint
 
-# Format the code
+# Format code
 npm run format
 ```
+
+## 📖 Tasmota Commands Reference
+
+This SDK implements the [Tasmota Commands API](https://tasmota.github.io/docs/Commands/). Common commands include:
+
+| Command | Description |
+|---------|-------------|
+| `Power` | Get/set power state for relay 1 |
+| `Power<n>` | Get/set power state for relay n |
+| `Power0` | Control all relays (0=off, 1=on) |
+| `Status` | Get device status |
+| `Status 0` | Get full device status |
+| `Status 8` | Get energy sensor data |
+| `Backlog` | Execute multiple commands |
+| `Restart 1` | Restart device |
+| `DeviceName` | Set device name |
+| `FriendlyName` | Set friendly name |
 
 ## 📄 License
 
@@ -735,35 +625,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 🆘 Support
-
-If you encounter any issues or have questions:
-
-1. Check the [documentation](README.md)
-2. Look at the [examples](src/examples/)
-3. Search existing [issues](../../issues)
-4. Create a new [issue](../../issues/new) if needed
-
 ## 🙏 Acknowledgments
 
-- [Tasmota](https://tasmota.github.io/docs/) - The amazing open-source firmware that makes this SDK possible
-- [TypeScript](https://www.typescriptlang.org/) - For excellent type safety and developer experience
+- [Tasmota](https://tasmota.github.io/docs/) - The amazing open-source firmware
+- [TypeScript](https://www.typescriptlang.org/) - For excellent type safety
 - [Zod](https://zod.dev/) - For runtime type validation
-- [Axios](https://axios-http.com/) - For reliable HTTP client functionality
-
-## 🔗 Related Projects
-
-- [Tasmota](https://github.com/arendst/Tasmota) - The main Tasmota firmware project
-- [Home Assistant](https://www.home-assistant.io/) - Popular home automation platform with Tasmota integration
-- [Node-RED](https://nodered.org/) - Flow-based development tool that works great with Tasmota devices
+- [Axios](https://axios-http.com/) - For HTTP client functionality
 
 ---
 

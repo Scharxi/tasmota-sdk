@@ -1,10 +1,32 @@
 import { z } from 'zod';
 
-// Power States
+// Power States - Tasmota returns uppercase ON/OFF
 export const PowerState = z.enum(['ON', 'OFF']);
 export type PowerState = z.infer<typeof PowerState>;
 
-export const PowerCommand = z.enum(['ON', 'OFF', 'TOGGLE']);
+/**
+ * Power command values supported by Tasmota
+ * @see https://tasmota.github.io/docs/Commands/#control
+ * 
+ * Tasmota accepts:
+ * - OFF: 0, off, false, OFF
+ * - ON: 1, on, true, ON  
+ * - TOGGLE: 2, toggle, TOGGLE
+ * - BLINK: 3 (start blinking)
+ * - BLINKOFF: 4 (stop blinking)
+ */
+export const PowerCommand = z.enum([
+  // Uppercase (standard)
+  'ON', 'OFF', 'TOGGLE',
+  // Lowercase (also accepted by Tasmota)
+  'on', 'off', 'toggle',
+  // Numeric string values
+  '0', '1', '2',
+  // Boolean-like
+  'true', 'false',
+  // Blink commands
+  '3', '4', 'BLINK', 'BLINKOFF',
+]);
 export type PowerCommand = z.infer<typeof PowerCommand>;
 
 // Device Configuration
@@ -48,7 +70,7 @@ export const StatusSTS = z.object({
   White: z.number().optional(),
   CT: z.number().optional(),
   Channel: z.array(z.number()).optional(),
-});
+}).passthrough(); // Allow additional fields like Wifi
 export type StatusSTS = z.infer<typeof StatusSTS>;
 
 export const StatusFWR = z.object({
@@ -59,8 +81,8 @@ export const StatusFWR = z.object({
   SDK: z.string(),
   CpuFrequency: z.number(),
   Hardware: z.string(),
-  CR: z.string(),
-});
+  CR: z.string().optional(),
+}).passthrough();
 export type StatusFWR = z.infer<typeof StatusFWR>;
 
 export const StatusLOG = z.object({
@@ -74,7 +96,7 @@ export const StatusLOG = z.object({
   TelePeriod: z.number(),
   Resolution: z.string(),
   SetOption: z.array(z.string()),
-});
+}).passthrough();
 export type StatusLOG = z.infer<typeof StatusLOG>;
 
 export const StatusMEM = z.object({
@@ -85,11 +107,11 @@ export const StatusMEM = z.object({
   FlashSize: z.number(),
   FlashChipId: z.string(),
   FlashFrequency: z.number(),
-  FlashMode: z.number(),
+  FlashMode: z.union([z.number(), z.string()]), // Can be number or string depending on firmware
   Features: z.array(z.string()),
   Drivers: z.string(),
   Sensors: z.string(),
-});
+}).passthrough(); // Allow additional fields like I2CDriver
 export type StatusMEM = z.infer<typeof StatusMEM>;
 
 export const StatusNET = z.object({
@@ -97,12 +119,15 @@ export const StatusNET = z.object({
   IPAddress: z.string(),
   Gateway: z.string(),
   Subnetmask: z.string(),
-  DNSServer: z.string(),
+  // Tasmota uses DNSServer1/DNSServer2 instead of DNSServer
+  DNSServer1: z.string().optional(),
+  DNSServer2: z.string().optional(),
+  DNSServer: z.string().optional(), // Keep for backwards compatibility
   Mac: z.string(),
   Webserver: z.number(),
   WifiConfig: z.number(),
   WifiPower: z.number(),
-});
+}).passthrough(); // Allow additional fields like HTTP_API
 export type StatusNET = z.infer<typeof StatusNET>;
 
 export const StatusTIM = z.object({
@@ -111,9 +136,9 @@ export const StatusTIM = z.object({
   StartDST: z.string(),
   EndDST: z.string(),
   Timezone: z.string(),
-  Sunrise: z.string(),
-  Sunset: z.string(),
-});
+  Sunrise: z.string().optional(),
+  Sunset: z.string().optional(),
+}).passthrough();
 export type StatusTIM = z.infer<typeof StatusTIM>;
 
 export const StatusSNS = z.object({
@@ -156,7 +181,7 @@ export const StatusResponse = z.object({
     SwitchRetain: z.number(),
     SensorRetain: z.number(),
     PowerRetain: z.number(),
-  }),
+  }).passthrough(), // Allow additional fields like InfoRetain, StateRetain, StatusRetain
   StatusPRM: z.object({
     Baudrate: z.number(),
     SerialConfig: z.string(),
@@ -171,7 +196,7 @@ export const StatusResponse = z.object({
     BCResetTime: z.string(),
     SaveCount: z.number(),
     SaveAddress: z.string(),
-  }),
+  }).passthrough(),
   StatusFWR,
   StatusLOG,
   StatusMEM,
@@ -186,11 +211,11 @@ export const StatusResponse = z.object({
     MAX_PACKET_SIZE: z.number(),
     KEEPALIVE: z.number(),
     SOCKET_TIMEOUT: z.number(),
-  }),
+  }).passthrough(),
   StatusTIM,
   StatusSNS,
   StatusSTS,
-});
+}).passthrough(); // Allow additional fields like StatusPTH
 export type StatusResponse = z.infer<typeof StatusResponse>;
 
 // Device Information

@@ -201,6 +201,21 @@ export class TasmotaDevice {
   }
 
   /**
+   * Start blinking a specific relay
+   * @see https://tasmota.github.io/docs/Commands/#control
+   */
+  async blink(relay = 1, options?: DeviceOperationOptions): Promise<PowerState> {
+    return this.setPowerState('3', relay, options);
+  }
+
+  /**
+   * Stop blinking a specific relay
+   */
+  async blinkOff(relay = 1, options?: DeviceOperationOptions): Promise<PowerState> {
+    return this.setPowerState('4', relay, options);
+  }
+
+  /**
    * Turn on all relays
    */
   async turnOnAll(options?: DeviceOperationOptions): Promise<PowerStatus> {
@@ -308,6 +323,44 @@ export class TasmotaDevice {
    */
   async restart(options?: DeviceOperationOptions): Promise<CommandResponse> {
     return this.sendCommand('Restart 1', options);
+  }
+
+  /**
+   * Execute multiple commands using Backlog
+   * Tasmota's Backlog allows executing up to 30 consecutive commands with a single request.
+   * Commands are separated by semicolons.
+   * @see https://tasmota.github.io/docs/Commands/#the-power-of-backlog
+   * @example
+   * // Set up WiFi and MQTT in one request
+   * await device.backlog(['SSID1 MyNetwork', 'Password1 secret', 'MqttHost broker.local']);
+   */
+  async backlog(
+    commands: string[],
+    options?: DeviceOperationOptions
+  ): Promise<CommandResponse> {
+    if (commands.length === 0) {
+      return { success: true, data: {} };
+    }
+
+    if (commands.length > 30) {
+      throw TasmotaError.validationError(
+        'Backlog supports a maximum of 30 commands',
+        undefined,
+        this.config.host
+      );
+    }
+
+    // Join commands with semicolons as per Tasmota documentation
+    const backlogCommand = `Backlog ${commands.join('; ')}`;
+    return this.sendCommand(backlogCommand, options);
+  }
+
+  /**
+   * Clear any pending Backlog commands
+   * Sending Backlog without arguments clears the queue
+   */
+  async clearBacklog(options?: DeviceOperationOptions): Promise<CommandResponse> {
+    return this.sendCommand('Backlog', options);
   }
 
   /**
